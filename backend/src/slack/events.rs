@@ -155,14 +155,11 @@ async fn handle_app_mention(state: Arc<AppState>, event: Value) -> anyhow::Resul
                 .sessions
                 .set_machine_id(&session.id, &machine.id)
                 .await?;
-            state
-                .sessions
-                .update_state(&session.id, SessionState::Authenticating)
-                .await?;
 
-            let auth_url = format!(
-                "{}/auth/claude/{}",
-                state.config.base_url, session.id
+            tracing::info!(
+                "Machine {} created for session {}",
+                machine.id,
+                session.id
             );
 
             state
@@ -170,18 +167,60 @@ async fn handle_app_mention(state: Arc<AppState>, event: Value) -> anyhow::Resul
                 .update_message(
                     channel_id,
                     &reply_ts,
-                    &format!(
-                        ":white_check_mark: VM started!\n\n:key: Please authenticate your Claude Code subscription:\n{}\n\nOnce authenticated, I'll start working on your request.",
-                        auth_url
-                    ),
+                    ":white_check_mark: VM started! Waiting for worker to be ready...",
                 )
                 .await?;
 
-            tracing::info!(
-                "Machine {} created for session {}",
-                machine.id,
-                session.id
-            );
+            let mut worker_ready = false;
+            for attempt in 0..15 {
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                match state.fly_client.get_machine(&machine.id).await {
+                    Ok(m) => {
+                        if m.state.as_deref() == Some("started") && m.private_ip.is_some() {
+                            worker_ready = true;
+                            tracing::info!("Worker ready on attempt {}", attempt + 1);
+                            break;
+                        }
+                        tracing::info!("Worker state: {:?} (attempt {})", m.state, attempt + 1);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to check machine state: {}", e);
+                    }
+                }
+            }
+
+            if worker_ready {
+                state
+                    .sessions
+                    .update_state(&session.id, SessionState::Active)
+                    .await?;
+
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+                state
+                    .slack
+                    .update_message(
+                        channel_id,
+                        &reply_ts,
+                        ":white_check_mark: VM ready! Processing your request...",
+                    )
+                    .await?;
+
+                send_prompt_to_worker(&state, &session.id, user_id, &prompt).await?;
+            } else {
+                state
+                    .slack
+                    .update_message(
+                        channel_id,
+                        &reply_ts,
+                        ":warning: VM started but worker is taking longer than expected. Try sending your message again in the thread.",
+                    )
+                    .await?;
+                state
+                    .sessions
+                    .update_state(&session.id, SessionState::Active)
+                    .await?;
+            }
         }
         Err(e) => {
             tracing::error!("Failed to create machine: {}", e);
