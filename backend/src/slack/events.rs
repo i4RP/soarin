@@ -314,15 +314,10 @@ async fn send_prompt_to_worker(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("No machine ID for session"))?;
 
-    let machine = state.fly_client.get_machine(machine_id).await?;
-    let worker_url = if let Some(ip) = &machine.private_ip {
-        format!("http://[{}]:3000", ip)
-    } else {
-        format!(
-            "http://{}.flycast:3000",
-            machine_id
-        )
-    };
+    let worker_url = format!(
+        "http://{}.vm.{}.internal:3000",
+        machine_id, state.config.flyio_app_name
+    );
 
     let client = reqwest::Client::new();
     let resp = client

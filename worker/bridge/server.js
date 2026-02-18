@@ -152,7 +152,7 @@ app.post("/cancel", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "::", () => {
   console.log(`Worker bridge listening on port ${PORT}`);
   console.log(`Session: ${SESSION_ID}`);
   console.log(`Backend: ${BACKEND_URL}`);
