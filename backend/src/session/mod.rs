@@ -44,6 +44,8 @@ pub struct Session {
     pub channel_id: String,
     pub thread_ts: String,
     pub machine_id: Option<String>,
+    pub oauth_token: Option<String>,
+    pub pending_prompt: Option<String>,
     pub state: SessionState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

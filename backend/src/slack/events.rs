@@ -192,7 +192,11 @@ async fn handle_app_mention(state: Arc<AppState>, event: Value) -> anyhow::Resul
             if worker_ready {
                 state
                     .sessions
-                    .update_state(&session.id, SessionState::Active)
+                    .set_pending_prompt(&session.id, &prompt)
+                    .await?;
+                state
+                    .sessions
+                    .update_state(&session.id, SessionState::Authenticating)
                     .await?;
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -202,11 +206,9 @@ async fn handle_app_mention(state: Arc<AppState>, event: Value) -> anyhow::Resul
                     .update_message(
                         channel_id,
                         &reply_ts,
-                        ":white_check_mark: VM ready! Processing your request...",
+                        ":white_check_mark: VM ready! Authentication required.\n\n:key: Please run `claude setup-token` on your local machine (where you are already logged into Claude Code) and paste the token here in this thread.\n\nThe token looks like: `sk-ant-oat01-...`",
                     )
                     .await?;
-
-                send_prompt_to_worker(&state, &session.id, user_id, &prompt).await?;
             } else {
                 state
                     .slack
@@ -261,6 +263,10 @@ async fn handle_thread_message(
         None => return Ok(()),
     };
 
+    if is_oauth_token(text) {
+        return handle_oauth_token(&state, &session, text, channel_id, thread_ts).await;
+    }
+
     match session.state {
         SessionState::Sleeping => {
             tracing::info!("Waking session {} for thread message", session.id);
@@ -291,12 +297,62 @@ async fn handle_thread_message(
                 .slack
                 .post_message(
                     channel_id,
-                    ":hourglass: Please complete Claude Code authentication first.",
+                    ":key: Please paste your Claude Code setup token to authenticate.\nRun `claude setup-token` on your local machine and paste the token here.",
                     Some(thread_ts),
                 )
                 .await?;
         }
         _ => {}
+    }
+
+    Ok(())
+}
+
+fn is_oauth_token(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("sk-ant-") || trimmed.starts_with("`sk-ant-") || trimmed.contains("sk-ant-oat")
+}
+
+fn extract_token(text: &str) -> String {
+    text.trim().trim_matches('`').trim().to_string()
+}
+
+async fn handle_oauth_token(
+    state: &Arc<AppState>,
+    session: &crate::session::Session,
+    text: &str,
+    channel_id: &str,
+    thread_ts: &str,
+) -> anyhow::Result<()> {
+    let token = extract_token(text);
+    tracing::info!("Received OAuth token for session {}", session.id);
+
+    state
+        .sessions
+        .set_oauth_token(&session.id, &token)
+        .await?;
+
+    state
+        .sessions
+        .update_state(&session.id, SessionState::Active)
+        .await?;
+
+    state
+        .slack
+        .post_message(
+            channel_id,
+            ":white_check_mark: Authentication successful! Processing your request...",
+            Some(thread_ts),
+        )
+        .await?;
+
+    let pending = session.pending_prompt.clone();
+    if let Some(prompt) = pending {
+        state
+            .sessions
+            .clear_pending_prompt(&session.id)
+            .await?;
+        send_prompt_to_worker(state, &session.id, &session.user_id, &prompt).await?;
     }
 
     Ok(())
@@ -314,6 +370,8 @@ async fn send_prompt_to_worker(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("No machine ID for session"))?;
 
+    let oauth_token = session.oauth_token.as_deref().unwrap_or("");
+
     let worker_url = format!(
         "http://{}.vm.{}.internal:3000",
         machine_id, state.config.flyio_app_name
@@ -328,6 +386,7 @@ async fn send_prompt_to_worker(
             "prompt": prompt,
             "channel_id": session.channel_id,
             "thread_ts": session.thread_ts,
+            "oauth_token": oauth_token,
         }))
         .send()
         .await;

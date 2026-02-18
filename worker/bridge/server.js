@@ -37,7 +37,7 @@ async function sendCallback(message) {
   }
 }
 
-function runClaude(prompt) {
+function runClaude(prompt, oauthToken) {
   return new Promise((resolve, reject) => {
     const args = [
       "--print",
@@ -50,12 +50,19 @@ function runClaude(prompt) {
 
     console.log(`Running: claude ${args.join(" ")}`);
 
+    const env = {
+      ...process.env,
+      HOME: "/home/worker",
+    };
+
+    if (oauthToken) {
+      env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+      console.log("Using OAuth token for authentication");
+    }
+
     const proc = spawn("claude", args, {
       cwd: "/home/worker/workspace",
-      env: {
-        ...process.env,
-        HOME: "/home/worker",
-      },
+      env: env,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -100,7 +107,7 @@ app.get("/health", (req, res) => {
 });
 
 app.post("/prompt", async (req, res) => {
-  const { prompt, session_id, user_id } = req.body;
+  const { prompt, session_id, user_id, oauth_token } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: "prompt is required" });
@@ -118,7 +125,7 @@ app.post("/prompt", async (req, res) => {
   try {
     await sendCallback(":hourglass_flowing_sand: Processing your request...");
 
-    const result = await runClaude(prompt);
+    const result = await runClaude(prompt, oauth_token);
 
     const maxLen = 3900;
     if (result.length > maxLen) {

@@ -27,6 +27,8 @@ impl SessionManager {
                 channel_id TEXT NOT NULL,
                 thread_ts TEXT NOT NULL,
                 machine_id TEXT,
+                oauth_token TEXT,
+                pending_prompt TEXT,
                 state TEXT NOT NULL DEFAULT 'creating',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -80,8 +82,8 @@ impl SessionManager {
     }
 
     pub async fn get_session(&self, id: &str) -> Result<Session> {
-        let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, String, String, String)>(
-            "SELECT id, user_id, channel_id, thread_ts, machine_id, state, created_at, updated_at FROM sessions WHERE id = ?",
+        let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, Option<String>, String, String, String)>(
+            "SELECT id, user_id, channel_id, thread_ts, machine_id, oauth_token, pending_prompt, state, created_at, updated_at FROM sessions WHERE id = ?",
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -93,9 +95,11 @@ impl SessionManager {
             channel_id: row.2,
             thread_ts: row.3,
             machine_id: row.4,
-            state: SessionState::from_str(&row.5),
-            created_at: chrono::DateTime::parse_from_rfc3339(&row.6)?.with_timezone(&chrono::Utc),
-            updated_at: chrono::DateTime::parse_from_rfc3339(&row.7)?.with_timezone(&chrono::Utc),
+            oauth_token: row.5,
+            pending_prompt: row.6,
+            state: SessionState::from_str(&row.7),
+            created_at: chrono::DateTime::parse_from_rfc3339(&row.8)?.with_timezone(&chrono::Utc),
+            updated_at: chrono::DateTime::parse_from_rfc3339(&row.9)?.with_timezone(&chrono::Utc),
         })
     }
 
@@ -104,8 +108,8 @@ impl SessionManager {
         channel_id: &str,
         thread_ts: &str,
     ) -> Result<Option<Session>> {
-        let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, String, String, String)>(
-            "SELECT id, user_id, channel_id, thread_ts, machine_id, state, created_at, updated_at FROM sessions WHERE channel_id = ? AND thread_ts = ? AND state != 'terminated'",
+        let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, Option<String>, String, String, String)>(
+            "SELECT id, user_id, channel_id, thread_ts, machine_id, oauth_token, pending_prompt, state, created_at, updated_at FROM sessions WHERE channel_id = ? AND thread_ts = ? AND state != 'terminated'",
         )
         .bind(channel_id)
         .bind(thread_ts)
@@ -119,9 +123,11 @@ impl SessionManager {
                 channel_id: r.2,
                 thread_ts: r.3,
                 machine_id: r.4,
-                state: SessionState::from_str(&r.5),
-                created_at: chrono::DateTime::parse_from_rfc3339(&r.6)?.with_timezone(&chrono::Utc),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&r.7)?.with_timezone(&chrono::Utc),
+                oauth_token: r.5,
+                pending_prompt: r.6,
+                state: SessionState::from_str(&r.7),
+                created_at: chrono::DateTime::parse_from_rfc3339(&r.8)?.with_timezone(&chrono::Utc),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&r.9)?.with_timezone(&chrono::Utc),
             })),
             None => Ok(None),
         }
@@ -149,9 +155,41 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn set_oauth_token(&self, id: &str, token: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET oauth_token = ?, updated_at = ? WHERE id = ?")
+            .bind(token)
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_pending_prompt(&self, id: &str, prompt: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET pending_prompt = ?, updated_at = ? WHERE id = ?")
+            .bind(prompt)
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_pending_prompt(&self, id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET pending_prompt = NULL, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_active_sessions(&self) -> Result<Vec<Session>> {
-        let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, String, String, String)>(
-            "SELECT id, user_id, channel_id, thread_ts, machine_id, state, created_at, updated_at FROM sessions WHERE state != 'terminated' ORDER BY created_at DESC",
+        let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, Option<String>, String, String, String)>(
+            "SELECT id, user_id, channel_id, thread_ts, machine_id, oauth_token, pending_prompt, state, created_at, updated_at FROM sessions WHERE state != 'terminated' ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -165,9 +203,11 @@ impl SessionManager {
                     channel_id: r.2,
                     thread_ts: r.3,
                     machine_id: r.4,
-                    state: SessionState::from_str(&r.5),
-                    created_at: chrono::DateTime::parse_from_rfc3339(&r.6).ok()?.with_timezone(&chrono::Utc),
-                    updated_at: chrono::DateTime::parse_from_rfc3339(&r.7).ok()?.with_timezone(&chrono::Utc),
+                    oauth_token: r.5,
+                    pending_prompt: r.6,
+                    state: SessionState::from_str(&r.7),
+                    created_at: chrono::DateTime::parse_from_rfc3339(&r.8).ok()?.with_timezone(&chrono::Utc),
+                    updated_at: chrono::DateTime::parse_from_rfc3339(&r.9).ok()?.with_timezone(&chrono::Utc),
                 })
             })
             .collect();
