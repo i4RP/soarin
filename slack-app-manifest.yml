@@ -1,0 +1,44 @@
+display_information:
+  name: Soarin
+  description: AI-powered development assistant using Claude Code
+  background_color: "#764ba2"
+  long_description: |
+    Soarin is a Slack bot that creates dedicated development environments
+    powered by Claude Code. Mention @Soarin with a prompt to start a new
+    session, then continue working in the thread.
+
+features:
+  bot_user:
+    display_name: Soarin
+    always_online: false
+  slash_commands:
+    - command: /sleep
+      url: https://YOUR_BACKEND_URL/slack/commands
+      description: Put the current Soarin session to sleep
+      usage_hint: ""
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - channels:read
+      - groups:read
+
+settings:
+  event_subscriptions:
+    request_url: https://YOUR_BACKEND_URL/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

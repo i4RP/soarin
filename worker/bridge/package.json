@@ -1,0 +1,12 @@
+{
+  "name": "soarin-worker-bridge",
+  "version": "1.0.0",
+  "description": "Bridge between Soarin backend and Claude Code CLI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
