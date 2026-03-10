@@ -1,0 +1,5 @@
+app = "soarin-workers"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
